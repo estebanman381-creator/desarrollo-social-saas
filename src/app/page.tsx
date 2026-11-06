@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import jsPDF from 'jspdf'
+import { guardarEntregaOffline, sincronizarDatosPendientes } from '@/lib/offlineDb'
 
 const CLAVE_TRABAJADORES = "dsdatos"
 
@@ -20,10 +21,32 @@ export default function CargarAyudaPage() {
   const [tipoAyuda, setTipoAyuda] = useState('Materiales de Construcción')
   const [descripcion, setDescripcion] = useState('')
 
-  // Estados de proceso
+  // Estados de proceso y conexión
   const [loading, setLoading] = useState(false)
   const [successMsg, setSuccessMsg] = useState('')
   const [lastEntry, setLastEntry] = useState<any>(null)
+  const [isOnline, setIsOnline] = useState(true)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setIsOnline(navigator.onLine)
+      sincronizarDatosPendientes()
+
+      const handleOnline = () => {
+        setIsOnline(true)
+        sincronizarDatosPendientes()
+      }
+      const handleOffline = () => setIsOnline(false)
+
+      window.addEventListener('online', handleOnline)
+      window.addEventListener('offline', handleOffline)
+
+      return () => {
+        window.removeEventListener('online', handleOnline)
+        window.removeEventListener('offline', handleOffline)
+      }
+    }
+  }, [])
 
   function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -76,68 +99,99 @@ export default function CargarAyudaPage() {
     setLoading(true)
     setSuccessMsg('')
 
+    const fechaActual = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
+
+    const personaDatos = {
+      dni: dni.trim(),
+      nombre: nombre.trim(),
+      apellido: apellido.trim(),
+      direccion: direccion.trim()
+    }
+
+    const entregaDatos = {
+      fecha: fechaActual,
+      tipo_ayuda: tipoAyuda,
+      descripcion: descripcion.trim(),
+      operador: operador.trim()
+    }
+
+    const registroGuardado = {
+      operador,
+      dni,
+      nombre,
+      apellido,
+      direccion,
+      tipoAyuda,
+      descripcion,
+      fecha: fechaActual
+    }
+
+    // Si no hay señal de internet, guardar localmente de inmediato
+    if (!navigator.onLine) {
+      await guardarEntregaOffline(personaDatos, entregaDatos)
+      setLastEntry(registroGuardado)
+      setSuccessMsg(`⚠️ Sin internet: Registro guardado localmente para el DNI ${dni}. Se sincronizará automáticamente al volver la red.`)
+      limpiarCampos()
+      setLoading(false)
+      return
+    }
+
     try {
-      // 1. Guardar/Actualizar Beneficiario en personas
+      // 1. Intentar Guardar/Actualizar Beneficiario en Supabase
       const { error: errPersona } = await supabase
         .from('personas')
-        .upsert({
-          dni: dni.trim(),
-          nombre: nombre.trim(),
-          apellido: apellido.trim(),
-          direccion: direccion.trim()
-        })
+        .upsert(personaDatos, { onConflict: 'dni' })
 
       if (errPersona) throw errPersona
 
-      // 2. Fecha formato local Argentina
-      const fechaActual = new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })
-
-      // 3. Insertar entrega
+      // 2. Insertar entrega en Supabase
       const { error: errEntrega } = await supabase
         .from('entregas')
         .insert([{
           dni_persona: dni.trim(),
-          fecha: fechaActual,
-          tipo_ayuda: tipoAyuda,
-          descripcion: descripcion.trim(),
-          operador: operador.trim()
+          ...entregaDatos
         }])
 
       if (errEntrega) throw errEntrega
 
-      const registroGuardado = {
-        operador,
-        dni,
-        nombre,
-        apellido,
-        direccion,
-        tipoAyuda,
-        descripcion,
-        fecha: fechaActual
-      }
-
       setLastEntry(registroGuardado)
-      setSuccessMsg(`¡Registro guardado correctamente para el DNI ${dni}!`)
-
-      // Limpiar campos formulario excepto operador
-      setDni('')
-      setNombre('')
-      setApellido('')
-      setDireccion('')
-      setDescripcion('')
+      setSuccessMsg(`¡Registro guardado correctamente en la base de datos para el DNI ${dni}!`)
+      limpiarCampos()
 
     } catch (err: any) {
-      alert("Error al guardar registro: " + err.message)
+      console.warn("Fallo en conexión, guardando offline:", err.message)
+      // Si falla por problemas de red o Supabase, respaldar offline
+      await guardarEntregaOffline(personaDatos, entregaDatos)
+      setLastEntry(registroGuardado)
+      setSuccessMsg(`⚠️ Error de red: Registro guardado en el dispositivo para el DNI ${dni}. Se subirá cuando se restablezca la conexión.`)
+      limpiarCampos()
     } finally {
       setLoading(false)
     }
   }
 
+  function limpiarCampos() {
+    setDni('')
+    setNombre('')
+    setApellido('')
+    setDireccion('')
+    setDescripcion('')
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-        <span>📋</span> Sistema de Gestión - Desarrollo Social
-      </h1>
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+          <span>📋</span> Sistema de Gestión - Desarrollo Social
+        </h1>
+        <span className={`text-xs px-3 py-1 rounded-full font-semibold border ${
+          isOnline 
+            ? 'bg-emerald-950/80 border-emerald-600 text-emerald-400' 
+            : 'bg-amber-950/80 border-amber-600 text-amber-400'
+        }`}>
+          {isOnline ? '🟢 Online' : '🟠 Modo Offline'}
+        </span>
+      </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
         <h2 className="text-lg font-semibold text-white mb-4">✍️ Registro de Beneficiario y Entrega</h2>
@@ -166,8 +220,13 @@ export default function CargarAyudaPage() {
           </form>
         ) : (
           <div>
-            <div className="bg-emerald-950/50 border border-emerald-800/80 text-emerald-300 px-4 py-2.5 rounded-lg text-sm mb-6">
-              Acceso concedido para carga de datos
+            <div className="bg-emerald-950/50 border border-emerald-800/80 text-emerald-300 px-4 py-2.5 rounded-lg text-sm mb-6 flex justify-between items-center">
+              <span>Acceso concedido para carga de datos</span>
+              {!isOnline && (
+                <span className="text-xs text-amber-300 font-medium">
+                  Los registros se guardarán localmente hasta recuperar señal
+                </span>
+              )}
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
@@ -261,7 +320,7 @@ export default function CargarAyudaPage() {
                 disabled={loading}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-lg text-sm transition-all disabled:opacity-50"
               >
-                {loading ? 'Guardando...' : 'Guardar Registro'}
+                {loading ? 'Guardando...' : (isOnline ? 'Guardar Registro' : 'Guardar Registro (Modo Offline)')}
               </button>
             </form>
 
