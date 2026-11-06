@@ -8,6 +8,11 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Desarrollo Social - Loreto",
   description: "Sistema de Gestión - Municipalidad de Loreto",
+  manifest: "/manifest.json",
+  icons: {
+    icon: "/loreto.png",
+    apple: "/loreto.png",
+  },
 };
 
 export default function RootLayout({

@@ -126,45 +126,60 @@ export default function CargarAyudaPage() {
       fecha: fechaActual
     }
 
-    // Si no hay señal de internet, guardar localmente de inmediato
-    if (!navigator.onLine) {
-      await guardarEntregaOffline(personaDatos, entregaDatos)
-      setLastEntry(registroGuardado)
-      setSuccessMsg(`⚠️ Sin internet: Registro guardado localmente para el DNI ${dni}. Se sincronizará automáticamente al volver la red.`)
-      limpiarCampos()
-      setLoading(false)
+    // 1. Si la red ya reporta estar Offline
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      try {
+        await guardarEntregaOffline(personaDatos, entregaDatos)
+        setLastEntry(registroGuardado)
+        setSuccessMsg(`⚠️ Sin internet: Registro guardado localmente para el DNI ${dni}. Se sincronizará automáticamente al volver la red.`)
+        limpiarCampos()
+      } catch (err: any) {
+        alert("Error al guardar localmente: " + err.message)
+      } finally {
+        setLoading(false)
+      }
       return
     }
 
+    // 2. Si reporta estar Online, intentamos guardar en Supabase con Timeout de 3.5 segundos
     try {
-      // 1. Intentar Guardar/Actualizar Beneficiario en Supabase
-      const { error: errPersona } = await supabase
-        .from('personas')
-        .upsert(personaDatos, { onConflict: 'dni' })
+      const guardarEnSupabase = async () => {
+        const { error: errPersona } = await supabase
+          .from('personas')
+          .upsert(personaDatos, { onConflict: 'dni' })
 
-      if (errPersona) throw errPersona
+        if (errPersona) throw errPersona
 
-      // 2. Insertar entrega en Supabase
-      const { error: errEntrega } = await supabase
-        .from('entregas')
-        .insert([{
-          dni_persona: dni.trim(),
-          ...entregaDatos
-        }])
+        const { error: errEntrega } = await supabase
+          .from('entregas')
+          .insert([{
+            dni_persona: dni.trim(),
+            ...entregaDatos
+          }])
 
-      if (errEntrega) throw errEntrega
+        if (errEntrega) throw errEntrega
+      }
+
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Timeout de conexión de red")), 3500)
+      )
+
+      await Promise.race([guardarEnSupabase(), timeout])
 
       setLastEntry(registroGuardado)
       setSuccessMsg(`¡Registro guardado correctamente en la base de datos para el DNI ${dni}!`)
       limpiarCampos()
 
     } catch (err: any) {
-      console.warn("Fallo en conexión, guardando offline:", err.message)
-      // Si falla por problemas de red o Supabase, respaldar offline
-      await guardarEntregaOffline(personaDatos, entregaDatos)
-      setLastEntry(registroGuardado)
-      setSuccessMsg(`⚠️ Error de red: Registro guardado en el dispositivo para el DNI ${dni}. Se subirá cuando se restablezca la conexión.`)
-      limpiarCampos()
+      console.warn("Error de conexión o timeout con Supabase, derivando a guardado offline:", err.message)
+      try {
+        await guardarEntregaOffline(personaDatos, entregaDatos)
+        setLastEntry(registroGuardado)
+        setSuccessMsg(`⚠️ Red inestable o sin conexión: Registro guardado localmente para el DNI ${dni}. Se subirá automáticamente al recuperar señal.`)
+        limpiarCampos()
+      } catch (dexieErr: any) {
+        alert("Error al respaldar en el dispositivo: " + dexieErr.message)
+      }
     } finally {
       setLoading(false)
     }

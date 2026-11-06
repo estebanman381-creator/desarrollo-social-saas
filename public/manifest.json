@@ -1,0 +1,23 @@
+{
+  "name": "Desarrollo Social - Loreto",
+  "short_name": "Desarrollo Social",
+  "description": "Sistema de Gestión de Ayuda Social - Municipalidad de Loreto",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/loreto.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/loreto.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
