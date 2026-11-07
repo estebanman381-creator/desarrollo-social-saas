@@ -30,20 +30,47 @@ export default function CargarAyudaPage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setIsOnline(navigator.onLine)
-      sincronizarDatosPendientes()
-
-      const handleOnline = () => {
-        setIsOnline(true)
-        sincronizarDatosPendientes()
+      
+      // Función centralizadora para verificar red y gatillar sincronización
+      const triggerAutoSync = () => {
+        const onlineStatus = navigator.onLine
+        setIsOnline(onlineStatus)
+        if (onlineStatus) {
+          sincronizarDatosPendientes()
+        }
       }
+
+      // 1. Ejecución inicial al montar el componente
+      triggerAutoSync()
+
+      // 2. Escuchas de eventos del navegador / iOS Safari
+      const handleOnline = () => triggerAutoSync()
       const handleOffline = () => setIsOnline(false)
+      const handleFocus = () => triggerAutoSync()
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          triggerAutoSync()
+        }
+      }
 
       window.addEventListener('online', handleOnline)
       window.addEventListener('offline', handleOffline)
+      window.addEventListener('focus', handleFocus)
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+
+      // 3. Polling periódico en segundo plano (cada 15 segundos intenta sincronizar si hay red)
+      const intervalId = setInterval(() => {
+        if (navigator.onLine) {
+          sincronizarDatosPendientes()
+        }
+      }, 15000)
 
       return () => {
         window.removeEventListener('online', handleOnline)
         window.removeEventListener('offline', handleOffline)
+        window.removeEventListener('focus', handleFocus)
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+        clearInterval(intervalId)
       }
     }
   }, [])
@@ -127,7 +154,7 @@ export default function CargarAyudaPage() {
       fecha: fechaActual
     }
 
-    // 1. Si está sin red o la conexión es inestable, delegar directamente a guardado offline (única fuente de verdad)
+    // 1. Si está sin red, delegar directamente a guardado offline local
     if (typeof window !== 'undefined' && !navigator.onLine) {
       try {
         await guardarEntregaOffline(personaDatos, entregaDatos)
