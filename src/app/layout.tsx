@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import Link from "next/link";
+import RegisterSW from "@/components/RegisterSW";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -23,6 +24,7 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body className={`${inter.className} bg-slate-950 text-slate-100 antialiased`}>
+        <RegisterSW />
         <div className="flex h-screen overflow-hidden">
           {/* Sidebar Lateral Fija */}
           <aside className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col justify-between shrink-0">
