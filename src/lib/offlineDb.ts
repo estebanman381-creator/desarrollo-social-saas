@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 
 export interface EntregaOffline {
   id?: number
+  uuid: string // UUID único para evitar duplicados en Supabase
   persona: {
     dni: string
     nombre: string
@@ -24,16 +25,20 @@ class BaseDeDatosLocal extends Dexie {
   constructor() {
     super('DesarrolloSocialOffline')
     this.version(1).stores({
-      entregasPendientes: '++id, synced'
+      entregasPendientes: '++id, uuid, synced'
     })
   }
 }
 
 export const dbLocal = new BaseDeDatosLocal()
 
+// Bandera para impedir que dos sincronizaciones corran al mismo tiempo
+let isSyncing = false
+
 // Función para guardar localmente si no hay conexión
 export async function guardarEntregaOffline(persona: any, entrega: any) {
   return await dbLocal.entregasPendientes.add({
+    uuid: crypto.randomUUID(), // Genera un ID único para la entrega
     persona,
     entrega,
     synced: 0
@@ -42,46 +47,56 @@ export async function guardarEntregaOffline(persona: any, entrega: any) {
 
 // Función para sincronizar datos pendientes con Supabase al recuperar internet
 export async function sincronizarDatosPendientes() {
-  if (!navigator.onLine) return
+  if (!navigator.onLine || isSyncing) return
 
-  const pendientes = await dbLocal.entregasPendientes.where('synced').equals(0).toArray()
+  isSyncing = true
 
-  if (pendientes.length === 0) return
+  try {
+    const pendientes = await dbLocal.entregasPendientes.where('synced').equals(0).toArray()
 
-  for (const item of pendientes) {
-    try {
-      // 1. Guardar o actualizar la persona en Supabase
-      const { error: errPersona } = await supabase
-        .from('personas')
-        .upsert({
-          dni: item.persona.dni,
-          nombre: item.persona.nombre,
-          apellido: item.persona.apellido,
-          direccion: item.persona.direccion
-        }, { onConflict: 'dni' })
-
-      if (errPersona) throw errPersona
-
-      // 2. Guardar la entrega asociada en Supabase
-      const { error: errEntrega } = await supabase
-        .from('entregas')
-        .insert({
-          dni_persona: item.persona.dni,
-          fecha: item.entrega.fecha,
-          tipo_ayuda: item.entrega.tipo_ayuda,
-          descripcion: item.entrega.descripcion,
-          operador: item.entrega.operador
-        })
-
-      if (errEntrega) throw errEntrega
-
-      // 3. Borrar de la base de datos local al confirmar subida
-      if (item.id) {
-        await dbLocal.entregasPendientes.delete(item.id)
-      }
-    } catch (err) {
-      console.error('Error al sincronizar registro offline:', err)
+    if (pendientes.length === 0) {
+      isSyncing = false
+      return
     }
+
+    for (const item of pendientes) {
+      try {
+        // 1. Guardar o actualizar la persona en Supabase
+        const { error: errPersona } = await supabase
+          .from('personas')
+          .upsert({
+            dni: item.persona.dni,
+            nombre: item.persona.nombre,
+            apellido: item.persona.apellido,
+            direccion: item.persona.direccion
+          }, { onConflict: 'dni' })
+
+        if (errPersona) throw errPersona
+
+        // 2. Guardar la entrega con UPSERT/UUID (evita duplicados si la red se corta a la mitad)
+        const { error: errEntrega } = await supabase
+          .from('entregas')
+          .upsert({
+            uuid: item.uuid || crypto.randomUUID(),
+            dni_persona: item.persona.dni,
+            fecha: item.entrega.fecha,
+            tipo_ayuda: item.entrega.tipo_ayuda,
+            descripcion: item.entrega.descripcion,
+            operador: item.entrega.operador
+          }, { onConflict: 'uuid' })
+
+        if (errEntrega) throw errEntrega
+
+        // 3. Borrar de la base de datos local al confirmar subida
+        if (item.id) {
+          await dbLocal.entregasPendientes.delete(item.id)
+        }
+      } catch (err) {
+        console.error('Error al sincronizar registro offline:', err)
+      }
+    }
+  } finally {
+    isSyncing = false
   }
 }
 
