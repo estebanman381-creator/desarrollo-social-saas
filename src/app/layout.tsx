@@ -14,6 +14,11 @@ export const metadata: Metadata = {
     icon: "/loreto.png",
     apple: "/loreto.png",
   },
+  appleWebApp: {
+    capable: true,
+    title: "Desarrollo Social",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export default function RootLayout({

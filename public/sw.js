@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ds-loreto-v1'
+const CACHE_NAME = 'ds-loreto-v2'
 const URLS_TO_CACHE = [
   '/',
   '/manifest.json',
@@ -25,7 +25,7 @@ self.addEventListener('activate', (event) => {
             return caches.delete(cache)
           }
         })
-      )
+      );
     })
   )
   self.clients.claim()
@@ -33,13 +33,15 @@ self.addEventListener('activate', (event) => {
 
 // Interceptación de peticiones de red
 self.addEventListener('fetch', (event) => {
-  // Solo interceptar peticiones GET dentro del mismo origen
   if (event.request.method !== 'GET') return
+
+  // Ignorar peticiones directas a la base de datos de Supabase (las maneja Dexie offline)
+  if (event.request.url.includes('supabase.co')) return
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
+      // 1. Si el recurso (HTML, JS, CSS) ya existe en caché, devolverlo inmediatamente
       if (cachedResponse) {
-        // Intentar actualizar en segundo plano si hay red
         fetch(event.request)
           .then((networkResponse) => {
             if (networkResponse && networkResponse.status === 200) {
@@ -50,12 +52,24 @@ self.addEventListener('fetch', (event) => {
         return cachedResponse
       }
 
-      return fetch(event.request).catch(() => {
-        // Si no hay red y busca la página principal
-        if (event.request.mode === 'navigate') {
-          return caches.match('/')
-        }
-      })
+      // 2. Si no está en caché, ir a buscarlo a la red y guardar una copia para el futuro
+      return fetch(event.request)
+        .then((networkResponse) => {
+          if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+            return networkResponse
+          }
+          const responseToCache = networkResponse.clone()
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache)
+          })
+          return networkResponse
+        })
+        .catch(() => {
+          // 3. Fallback en caso de estar totalmente sin conexión
+          if (event.request.mode === 'navigate') {
+            return caches.match('/')
+          }
+        })
     })
   )
 })
