@@ -5,6 +5,15 @@ import { supabase } from '@/lib/supabase'
 
 const CLAVE_DIRECTIVOS = "dsloreto26"
 
+interface Entrega {
+  id?: string | number
+  dni_persona?: string
+  tipo_ayuda?: string
+  fecha?: string
+  descripcion?: string
+  operador?: string
+}
+
 const MESES = [
   { value: '1', label: 'Enero' },
   { value: '2', label: 'Febrero' },
@@ -20,12 +29,10 @@ const MESES = [
   { value: '12', label: 'Diciembre' },
 ]
 
-// Extrae mes y año tolerando formato argentino ("D/M/YYYY, HH:mm:ss") e ISO ("YYYY-MM-DD...")
 function extraerMesYAnio(fechaStr?: string): { mes: number; anio: number } | null {
   if (!fechaStr) return null
   const limpia = fechaStr.trim()
 
-  // Caso 1: Formato D/M/YYYY o DD/MM/YYYY
   const matchLatam = limpia.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
   if (matchLatam) {
     return {
@@ -34,7 +41,6 @@ function extraerMesYAnio(fechaStr?: string): { mes: number; anio: number } | nul
     }
   }
 
-  // Caso 2: Formato ISO YYYY-MM-DD
   const matchIso = limpia.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
   if (matchIso) {
     return {
@@ -43,7 +49,6 @@ function extraerMesYAnio(fechaStr?: string): { mes: number; anio: number } | nul
     }
   }
 
-  // Caso 3: Fallback nativo
   const parsed = new Date(limpia)
   if (!isNaN(parsed.getTime())) {
     return {
@@ -60,10 +65,9 @@ export default function DashboardPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [errorPass, setErrorPass] = useState(false)
 
-  const [entregas, setEntregas] = useState<any[]>([])
+  const [entregas, setEntregas] = useState<Entrega[]>([])
   const [loading, setLoading] = useState(false)
 
-  // Estados de filtro ('TODOS' por defecto para ver el total histórico al entrar)
   const [anioSeleccionado, setAnioSeleccionado] = useState<string>('TODOS')
   const [mesSeleccionado, setMesSeleccionado] = useState<string>('TODOS')
 
@@ -85,22 +89,20 @@ export default function DashboardPage() {
       .select('*')
 
     if (!error && data) {
-      setEntregas(data)
+      setEntregas(data as Entrega[])
     }
     setLoading(false)
   }
 
-  // Obtener lista de años únicos presentes en los registros (ordenados descendente) + año actual
-  const aniosDisponibles = Array.from(
-    new Set([
-      new Date().getFullYear(),
-      ...entregas
-        .map((e) => extraerMesYAnio(e.fecha)?.anio)
-        .filter((a): a is number => a !== undefined),
-    ])
-  ).sort((a, b) => b - a)
+  const aniosSet = new Set<number>([2026])
+  entregas.forEach((e) => {
+    const parsed = extraerMesYAnio(e.fecha)
+    if (parsed) {
+      aniosSet.add(parsed.anio)
+    }
+  })
+  const aniosDisponibles = Array.from(aniosSet).sort((a, b) => b - a)
 
-  // Aplicar filtros sobre las entregas
   const entregasFiltradas = entregas.filter((entrega) => {
     if (anioSeleccionado === 'TODOS' && mesSeleccionado === 'TODOS') {
       return true
@@ -117,21 +119,20 @@ export default function DashboardPage() {
     return coincideAnio && coincideMes
   })
 
-  // Cálculos de métricas sobre los datos filtrados
   const totalAyudas = entregasFiltradas.length
   const beneficiariosUnicos = new Set(entregasFiltradas.map((e) => e.dni_persona)).size
   const tiposDistintos = new Set(entregasFiltradas.map((e) => e.tipo_ayuda)).size
 
-  // Desglose por tipo de ayuda ordenado de mayor a menor
-  const desgloseTipo = entregasFiltradas.reduce((acc: Record<string, number>, curr) => {
+  const desgloseTipo: Record<string, number> = {}
+  entregasFiltradas.forEach((curr) => {
     const tipo = curr.tipo_ayuda || 'Otros'
-    acc[tipo] = (acc[tipo] || 0) + 1
-    return acc
-  }, {})
+    desgloseTipo[tipo] = (desgloseTipo[tipo] || 0) + 1
+  })
 
-  const desgloseOrdenado = Object.entries(desgloseTipo).sort(([, a], [, b]) => b - a)
+  const desgloseOrdenado: [string, number][] = Object.entries(desgloseTipo).sort(
+    (a, b) => b[1] - a[1]
+  )
 
-  // Etiqueta descriptiva del período actual
   const nombreMes = MESES.find((m) => m.value === mesSeleccionado)?.label
   const etiquetaPeriodo =
     anioSeleccionado === 'TODOS' && mesSeleccionado === 'TODOS'
@@ -190,7 +191,6 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="space-y-6">
-                {/* Barra de Filtros por Período */}
                 <div className="bg-slate-800/40 border border-slate-800 p-4 rounded-xl flex flex-col md:flex-row md:items-end justify-between gap-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1 max-w-lg">
                     <div>
@@ -256,7 +256,6 @@ export default function DashboardPage() {
                   </div>
                 ) : (
                   <>
-                    {/* Métricas clave */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="bg-slate-800/60 border border-slate-700 p-5 rounded-xl">
                         <p className="text-xs text-slate-400 font-semibold uppercase">Total Ayudas</p>
@@ -274,7 +273,6 @@ export default function DashboardPage() {
 
                     <hr className="border-slate-800" />
 
-                    {/* Tabla Desglose por Tipo */}
                     <div>
                       <h3 className="text-lg font-semibold text-white mb-3">
                         Desglose por Tipo de Ayuda
